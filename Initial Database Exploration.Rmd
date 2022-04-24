@@ -1,0 +1,22 @@
+---
+title: "Initial Database Look"
+author: "Keenan Smith"
+date: "4/11/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+con <- DBI::dbConnect(odbc::odbc(),
+                      Driver = "PostgreSQL Unicode(x64)",
+                      Server = "localhost",
+                      Database = "ncsugrad",
+                      UID = rstudioapi::askForPassword("Database User"),
+                      PWD = rstudioapi::askForPassword("Database Password"),
+                      Port = 5432)
+
+```
+
