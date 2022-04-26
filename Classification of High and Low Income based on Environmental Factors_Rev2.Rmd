@@ -1,0 +1,573 @@
+---
+title: "Classification of High and Low Income based on Environmental Climate Factors"
+author: "Keenan Smith"
+date: "`r Sys.Date()`"
+geometry: margin=1cm
+output: 
+  pdf_document:
+    df_print: kable
+    latex_engine: xelatex
+---
+
+# Introduction
+
+When beginning this project, I knew I wanted to start with global data from the World Bank. I was unsure exactly where to begin, but I knew with the wealth of information within their archives, I would be able to find something to model. In the end, I settled on examining the indicators deemed important for climate change (World Bank Group, 2022) and examing whether they are useful indicators for determining whether a country is "High Income" or "Low-Middle" income.
+
+# Methodology & Process
+
+"Built with R Version `r getRversion()`"
+
+The first step in this project is to gather the data. This was done using the "WDI" package/API within R. Several steps were required to pull all 88 variables into R and make them useful. The first step was to write an R script to pull the data in and output it into a useful CSV to pull back into an R-Markdown document. Then the data were examined and determined which indicators were simply lacking in terms of usable data (lots of NA values or indicators like others.) Initially, two data sets were created since the data comes in terms of countries and years: One for the year 2010 and one for the year 2018. Unfortunately, 2018 had NA values in every single country so it could not be used for classification within the construct used to classify the model. The only full set of data are 2010 for 58 countries of 45 predictors. This original data set has n greater than p but not by much. Once this dataset was selected, I closely followed the methods used and recommended in Kirenz's" Classification with Tidymodels, Workflows and Recipes" which follows the Tidymodels framework in which I prefer to do my R coding. This process begins with exploratory data analysis and the printing of several histograms and boxplots to examine the data and examine how they react to the different income levels. Thankfully, the Tidymodels framework allows for preprocessing the data before they are modeled and analyzed. The steps chosen here were to transform the right skewed data, then normalize the data, then remove any variables and lastly, remove highly correlated values using the Pearson method. The model is then fit and validated using 10-fold cross validation with the following: Sensitivity, Precision, F Measure, Accuracy, Kappa, Roc Auc, and Specificity.
+
+## Limitations
+
+- There are only a handful of countries with full datasets for the variables in question
+- The data originally contains High, Upper Middle, Lower Middle and Low Income countries, due the constraints of what was learned in ISE537, multinomial classification was not used in this project
+- This is a class project for ISE537. There is more that could be done here to continue to look into this data and determine ways to classify nations based on World Bank indicators
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r Library Initialize Block, include=FALSE}
+library(tidyverse)
+library(tidymodels)
+library(glmnet)
+library(visdat)
+library(vip)
+library(doParallel)
+library(kableExtra)
+library(parallel)
+
+all_cores <- parallel::detectCores(logical = FALSE)
+
+cl <- makePSOCKcluster(all_cores)
+registerDoParallel(cl)
+
+clusterEvalQ(cl, {library(tidymodels)})
+```
+
+```{r Functions, include=FALSE}
+# Box-plot Printing Function for Ease of Use (pulled from Kirenz, 2021)
+print_boxplot_2010 <- function(.y_var){
+  
+  # convert strings to variable
+  y_var <- sym(.y_var) 
+ 
+  # unquote variables using {{}}
+  explore_2010 %>% 
+  ggplot(aes(x = income_status, y = {{y_var}},
+             fill = income_status, color = income_status)) +
+  geom_boxplot(alpha=0.4) 
+  
+} 
+
+# Box-plot Printing Function for Ease of Use (pulled from Kirenz, 2021)
+print_boxplot_2018 <- function(.y_var){
+  
+  # convert strings to variable
+  y_var <- sym(.y_var) 
+ 
+  # unquote variables using {{}}
+  explore_2018 %>% 
+  ggplot(aes(x = income_status, y = {{y_var}},
+             fill = income_status, color = income_status)) +
+  geom_boxplot(alpha=0.4) 
+  
+} 
+
+print_histogram_2010 <- function(.y_var){
+  
+  # convert strings to variable
+  y_var <- sym(.y_var) 
+ 
+  # unquote variables using {{}}
+  explore_2010 %>% 
+  ggplot(aes(x = {{y_var}},
+             fill = income_status, color = income_status)) +
+  geom_histogram() 
+  
+} 
+
+print_histogram_2018 <- function(.y_var){
+  
+  # convert strings to variable
+  y_var <- sym(.y_var) 
+ 
+  # unquote variables using {{}}
+  explore_2018 %>% 
+  ggplot(aes(x = {{y_var}},
+             fill = income_status, color = income_status)) +
+  geom_histogram() 
+  
+} 
+
+get_model <- function(x) {
+  extract_fit_parsnip(x) %>% tidy()
+}
+```
+
+```{r Data Tidy, include=FALSE}
+# Getting Data In
+env_wdi <- read_csv("tidy_env_wdi", show_col_types = FALSE)
+
+# Cleaning Data of Majority NA Values and Ready for Year Splits
+env_wdi_ready <-
+  env_wdi |>
+  mutate(region = as.factor(region),
+         income = as.factor(income),
+         income_status = as.factor(ifelse(income == "High income", "High", "Middle_Low"))) |>
+  arrange(year) |>
+  filter(year < 2019 & income != "Aggregates" & income != "Not classified" & !is.na(income)) |>
+  select(-status, -lastupdated, -forest_km, -avg_precip_mm, -urban_pop, -ease_business, -cpia_public_sec, -health_workers, -underweight_5_per,
+         -pov_headcount, -renew_non_hydro, -energy_use_oil_eqiv, -energy_use_oil_percap, -co2_intensity, -co2_gaseous_per, -co2_emissions_met, 
+         -co2_emissions, -co2_liquid_per, -co2_solid_per, -other_greenhouse_per, -total_greenhouse_per, -methane_per, -pfc_emission_mt, 
+         -sf6_emission_mt, -disaster_risk_score, -ghg_emission_mt, -dro_flood_extemp_per, -pop_agglo_mil_per, -water_withdrawals_cub, 
+         -water_withdrawals_per, -iso3c, -capital, -longitude, -latitude, -lending, -country, -irrigated_land_per, -avg_precip_mm, -irrigated_land_per,
+         -terr_protect_per, -terr_mari_protect_per, -marine_protect_per, -income) 
+
+```
+
+```{r Yearly Data, include=FALSE}
+
+env_wdi_2010_na <-
+  env_wdi_ready |>
+  filter(year == 2010) |>
+  select(-year, -iso2c,-urban_below_5_per, -land_below_5_per, -pop_below_5_per, -rural_below_5, -rural_below_5_per,
+         -urban_below_5, -urban_below_5_per, -rural_pop_below_5, -urban_pop_below_5, -region)
+
+env_wdi_2010 <-
+  env_wdi_ready |>
+  filter(year == 2010) |>
+  select(-year, -iso2c,-urban_below_5_per, -land_below_5_per, -pop_below_5_per, -rural_below_5, -rural_below_5_per,
+         -urban_below_5, -urban_below_5_per, -rural_pop_below_5, -urban_pop_below_5, -region) |>
+  na.omit()
+```
+
+```{r 2010 Initial Data Analysis}
+vis_dat(env_wdi_2010)
+# vis_miss(env_wdi_2010)
+
+#is.na(env_wdi_2010) |>
+#  colSums()
+```
+
+```{r Looking at the Percentages of the Classification Variable}
+env_wdi_2010 %>% 
+  count(income_status, # count observations
+        name ="total") %>%  # name the new variable 
+  mutate(percent = total/sum(total))
+```
+
+```{r Data Overview for 2010, include=FALSE}
+# skimr::skim(env_wdi_2010)
+```
+
+## Data Budget Spending
+
+```{r Splitting Data}
+set.seed(100)
+
+split_2010 <- initial_split(env_wdi_2010, prop = .8, strata = income_status)
+
+# 2010 Data Split
+train_2010 <- training(split_2010)
+test_2010 <- testing(split_2010)
+
+# Exploration Datasets to isolate Dataframes from Tampering
+explore_2010 <- train_2010
+
+# k-fold Validation Set Creation
+cv_folds_2010 <-vfold_cv(train_2010, v = 10, strata = income_status)
+```
+
+```{r Data Exploration Starter, include=FALSE}
+y_var_2010 <- 
+  explore_2010 %>% 
+  select(where(is.numeric)) %>% 
+  variable.names() # obtain name
+```
+
+```{r 2010 Boxplots, include=FALSE}
+purrr::map(y_var_2010, print_boxplot_2010)
+```
+
+```{r Histograms, include=FALSE}
+purrr::map(y_var_2010, print_histogram_2010)
+```
+
+## Data Pre-processing
+
+```{r Recipe for 2010}
+env_2010_rec <-
+  recipe(income_status ~ ., data = train_2010) |>
+  step_log(agrid_land_km, arable_per, forest_per, pop_tot, mort_rate, coal_power_per, hydro_power_per, gas_power_per,
+           nuke_power_per, oil_power_per, renew_power_per, renew_non_hydro_per, renew_consum_per, elec_consum_kw,
+           co2_gaseous_kt, co2_liquid_kt, co2_emmision_mt, co2_solid_kt, total_greenhouse_mt, hfc_emissions_mt,
+           methane_mt, no_emission_mt, agri_forest_fish_gdp_per) |>
+  step_naomit(all_predictors(), skip = TRUE) |>
+  step_normalize(all_numeric_predictors()) |>
+  step_dummy(all_nominal_predictors()) |>
+  step_zv(all_numeric_predictors()) |>
+  step_corr(all_predictors(), threshold = .7, method = "pearson")
+
+prepped_2010 <-
+  env_2010_rec |>
+  prep() |>
+  juice()
+```
+
+## Data Prep
+
+```{r Look into Post Processing Data}
+glimpse(prepped_2010)
+```
+
+After the data is preprocessed and correlation is checked and removed from the system, the model is left with 14 indicators to classify income status. This is drastically reduced from the API pull from the World Bank data logs which had 88 variables and then that was reduced down to 37 based on data availability. The indicators left have a good variety to them in selecting a wealth of information pertaining to climate change. It takes into account the use of the land, the production of the land, the population, investment from foreign governments, indicators based on schooling and then the larger talking points of climate change which are based on greenhouse gases and other emissions. It is also left with the value added to the GDP due to agriculture, forestry, and fishing. 
+
+```{r Model Specification}
+# Logistic Regression Model Spec
+log_spec <-
+  logistic_reg() |>
+  set_engine("glm") |>
+  set_mode("classification")
+
+# Lasso Logistic Regression Using Glmnet
+lasso_spec <-
+  logistic_reg(penalty = tune(), mixture = 1) |>
+  set_mode("classification") |>
+  set_engine("glmnet")
+
+# Elastic Net Logistic Regression Using Glmnet
+elastic_spec <-
+  logistic_reg(penalty = tune(), mixture = tune()) |>
+  set_mode("classification") |>
+  set_engine("glmnet")
+```
+
+```{r Fitting Validation Sets, include=FALSE}
+# 2010 Model Workflow
+log_wflow_2010 <-
+  workflow() |>
+  add_recipe(env_2010_rec) |>
+  add_model(log_spec)
+
+# Fitting Logistic Regression to Training Data
+log_res <- fit(log_wflow_2010, train_2010)
+
+# Getting Predictions from Logistic Regression Model
+testing_2010 <- predict(log_res, new_data =  test_2010 |> select(-income_status))
+testing_probs <- predict(log_res, new_data = test_2010, type = "prob")
+testing_2010 <- bind_cols(log_res_pred = testing_2010, test_2010 %>% select(income_status))
+
+# Model Validation for Logistic Regression
+log_res_2010 <- 
+  log_wflow_2010 %>% 
+  fit_resamples(
+    resamples = cv_folds_2010, 
+    metrics = metric_set(
+      recall, precision, f_meas, 
+      accuracy, kap,
+      roc_auc, sens, spec),
+    control = control_resamples(
+      save_pred = TRUE,
+      extract = get_model)
+    ) 
+```
+
+## GLM Fit & Visuals
+
+This dataset presented a lot of challenges within the analysis. First, the data is mainly incomplete for many countries cataloged by the World Bank. This led to a very limited dataset when analyzing the classification fit. The first method used was a Tidymodels set up using the base R “glm” engine. An issue occurred within the glm.fit function within R as a result of a complete separation within the dataset resulting in a fit that was ok, but not desired. The conclusion at this point was that the indicators in question did not adequately provide a good classification for whether a nation was “High Income” or “Low Middle”.
+
+```{r GLM Visuals}
+log_res |>
+  extract_fit_engine() |>
+  summary()
+```
+
+```{r Examining the Model Fit}
+log_res_2010$.extracts[[1]][[1]]
+all_coef <- map_dfr(log_res_2010$.extracts, ~ .x[[1]][[1]])
+
+glm_metrics <- log_res_2010 |>  collect_metrics(summarize = TRUE)
+
+glm_metrics
+
+```
+
+As we can see, after validation, the accuracy of the model is ok, providing an accurate classification about 71 percent of the time. The precision of the model is also ok providing a very similar value accuracy with it providing a 71.6% ability to label the positives correctly.  The sensitivity is where the model really starts to fall off with the true positive rate only being 55%.  The F Score is another performance metric that utilizes precision and sensitivity to determine the accuracy of the model and in this case, it gives the glm logistic regression a score of 59.6%. 
+
+```{r Examining the Model Fit Part 2}
+log_pred <- 
+  log_res_2010 |>
+  collect_predictions()
+
+log_pred |> 
+  conf_mat(income_status, .pred_class) 
+
+log_pred |> 
+  conf_mat(income_status, .pred_class) |> 
+  autoplot(type = "heatmap")
+```
+
+## GLM Conclusion
+
+We can conclude with this model that there is more work to be done to possibly get these climate change indicators to classify whether or not a country is part of the high income or low-middle income classification. 
+Originally, when I had first run this model, I had thought that the indicators are inadequate indicators of a nations status as a high income nation, however, I did some research and discovered that both LASSO and Elastic Net logistic regression can be also be used to classify and have the ability to overcome the issues present in the R GLM function of complete separation by their ability to apply penalties. 
+
+## LASSO Logistic Regression
+
+The LASSO is particularly useful because it provides variable selection as well as shrinking the indicators to the best possible level at the expense of a slight increase in bias within the data. This is done by tuning the lambda "tuning" value to an optimal position. In this case, the lambda is selected by running a tuning grid using the dials library in R. Then the best lambda is selected based on accuracy. 
+
+```{r Lasso Logistic Regression, include=FALSE}
+# Setting up the Basic Workflow for Lasso based on Silge
+lasso_workflow <-
+  workflow() |>
+  add_recipe(env_2010_rec)
+
+# Setting up a Grid for Tuning the Ridge Regression
+lambda_grid <- grid_regular(penalty(c(-5,5)), levels = 50)
+
+# Finding Lambda based on 10 Fold CV
+lasso_grid <- tune_grid(
+  lasso_workflow |> add_model(lasso_spec),
+  resamples = cv_folds_2010,
+  grid = lambda_grid)
+
+# Selecting Lambda based on the best RMSE value from the Tuned Grid
+best_lasso_accuracy <- lasso_grid |>
+  select_best("accuracy")
+
+# Final Lasso Regression Workflow
+final_lasso <- finalize_workflow(
+  lasso_workflow |> add_model(lasso_spec),
+  best_lasso_accuracy
+)
+
+log_lasso_2010 <- 
+  final_lasso %>% 
+  fit_resamples(
+    resamples = cv_folds_2010, 
+    metrics = metric_set(
+      recall, precision, f_meas, 
+      accuracy, kap,
+      roc_auc, sens, spec),
+    control = control_resamples(
+      save_pred = TRUE,
+      extract = get_model)
+    ) 
+
+log_res_lasso <- fit(final_lasso, train_2010)
+
+testing_lasso_2010 <- predict(log_res_lasso, new_data =  test_2010 |> select(-income_status))
+testing_2010 <- bind_cols(testing_lasso_2010, testing_2010)
+```
+
+## LASSO Fit & Visuals
+
+```{r LASSO Visuals}
+# A very Cool Graph Based on Silge Work
+lasso_grid |>
+  collect_metrics() |>
+  ggplot(aes(penalty, mean, color = .metric)) +
+  geom_errorbar(aes(
+    ymin = mean - std_err,
+    ymax = mean + std_err
+  ),
+  alpha = 0.5
+  ) +
+  geom_line(size = 1.5) +
+  facet_wrap(~.metric, scales = "free", nrow = 2) +
+  scale_x_log10() +
+  theme(legend.position = "none")
+
+# A very nice graph that shows the predictors in Columns
+final_lasso |>
+  fit(train_2010) |>
+  extract_fit_parsnip() |>
+  vi(lambda = best_lasso_accuracy$penalty) |>
+  mutate(
+    Importance = abs(Importance),
+    Variable = fct_reorder(Variable, Importance)
+  ) |>
+  ggplot(aes(x = Importance, y = Variable, fill = Sign)) +
+  geom_col() +
+  scale_x_continuous(expand = c(0,0)) +
+  labs(y = NULL)
+
+# Regression Coefficient Path
+final_lasso |>
+  fit(data = train_2010) |>
+  extract_fit_engine() |>
+  autoplot()
+
+final_lasso |>
+  fit(data = train_2010) |>
+  extract_fit_parsnip() |>
+  tidy()
+```
+
+## LASSO Conclusion
+
+```{r Lasso Logistic Regression Analysis}
+log_lasso_2010$.extracts[[1]][[1]]
+all_coef <- map_dfr(log_res_2010$.extracts, ~ .x[[1]][[1]])
+
+lasso_metrics <- log_lasso_2010 |>  collect_metrics(summarize = TRUE)
+
+lasso_metrics
+
+log_pred_lasso <- 
+  log_lasso_2010 |>
+  collect_predictions()
+
+log_pred_lasso |> 
+  conf_mat(income_status, .pred_class) |> 
+  autoplot(type = "heatmap")
+```
+
+The effects of utilizing LASSO in this classification model is tremendous. It increasing the accuracy to 90%. The sensitivity is now 85%. This model is now much better at predicting the income level of a country based on climate change indicators. The model is not perfect, but it does now start to drive some conclusions that these indicators can classify what income status a country is. 
+
+
+## Elastic Net Logistic Regression
+
+The last model utilized in this study is the Elastic Net Model. This is used when it is required to utilize regularization methods but there is a trade-off between variable selection and smaller coefficients. With the LASSO performing well, I decided to run Elastic Net as the final model over Ridge Regression since the LASSO eliminated 6 of the 14 indicators and had good metrics so I thought I would try to bring that compromise into the model. 
+
+```{r Elastic Net Logistic Regression, include=FALSE}
+mixture_parameters <- parameters(penalty(), mixture())
+elastic_grid <-
+  grid_regular(mixture_parameters, levels = 25)
+
+# Setting up the Basic Workflow for Lasso based on Silge
+elastic_workflow <-
+  workflow() |>
+  add_recipe(env_2010_rec)
+
+# Finding Lambda based on 10 Fold CV
+elastic_grid <- tune_grid(
+  elastic_workflow |> add_model(elastic_spec),
+  resamples = cv_folds_2010,
+  grid = elastic_grid)
+
+# Selecting Lambda based on the best RMSE value from the Tuned Grid
+best_elastic_accuracy <- elastic_grid |>
+  select_best("accuracy")
+
+# Final Lasso Regression Workflow
+final_elastic <- finalize_workflow(
+  elastic_workflow |> add_model(elastic_spec),
+  best_elastic_accuracy
+)
+
+log_res_elastic <- fit(final_elastic, train_2010)
+
+testing_elastic_2010 <- predict(log_res_elastic, new_data =  test_2010 |> select(-income_status))
+testing_2010 <- bind_cols(testing_elastic_2010, testing_2010)
+
+log_elastic_2010 <- 
+  final_elastic %>% 
+  fit_resamples(
+    resamples = cv_folds_2010, 
+    metrics = metric_set(
+      recall, precision, f_meas, 
+      accuracy, kap,
+      roc_auc, sens, spec),
+    control = control_resamples(
+      save_pred = TRUE,
+      extract = get_model)
+    ) 
+```
+
+## Elastic Net Fit & Visuals
+
+```{r Elastic Net Visuals}
+# A very Cool Graph Based on Silge Work
+elastic_grid |>
+  collect_metrics() |>
+  ggplot(aes(penalty, mean, color = .metric)) +
+  geom_errorbar(aes(
+    ymin = mean - std_err,
+    ymax = mean + std_err
+  ),
+  alpha = 0.5
+  ) +
+  geom_line(size = 1.5) +
+  facet_wrap(~.metric, scales = "free", nrow = 2) +
+  scale_x_log10() +
+  theme(legend.position = "none")
+
+# A very nice graph that shows the predictors in Columns
+final_elastic |>
+  fit(train_2010) |>
+  extract_fit_parsnip() |>
+  vi(lambda = best_elastic_accuracy$penalty) |>
+  mutate(
+    Importance = abs(Importance),
+    Variable = fct_reorder(Variable, Importance)
+  ) |>
+  ggplot(aes(x = Importance, y = Variable, fill = Sign)) +
+  geom_col() +
+  scale_x_continuous(expand = c(0,0)) +
+  labs(y = NULL)
+
+# Regression Coefficient Path
+final_elastic |>
+  fit(data = train_2010) |>
+  extract_fit_engine() |>
+  autoplot()
+
+final_elastic |>
+  fit(data = train_2010) |>
+  extract_fit_parsnip() |>
+  tidy()
+```
+## Elastic Net Conclusion
+
+```{r Elastic Net Analysis}
+log_elastic_2010$.extracts[[1]][[1]]
+all_coef <- map_dfr(log_elastic_2010$.extracts, ~ .x[[1]][[1]])
+
+elastic_metrics <- log_elastic_2010 |>  collect_metrics(summarize = TRUE)
+
+elastic_metrics
+
+log_pred_elastic <- 
+  log_elastic_2010 |>
+  collect_predictions()
+
+log_pred_elastic |> 
+  conf_mat(income_status, .pred_class) |> 
+  autoplot(type = "heatmap")
+```
+
+The Elastic Net chose a penalty of .38 and yielded the best classification metrics of any of the models shown here. The accuracy is 92% and the sensitivity is 85%. The heatmap of the confusion matrix also shows that it has an improvement over those of the GLM and LASSO fit. 
+
+```{r All Models Predictions and Metrics}
+testing_2010
+
+glm_metrics
+lasso_metrics
+elastic_metrics
+```
+
+# Conclusion
+
+After a disheartening beginning to this project, it actually yielded quite exciting results. The results of the GLM could have drawn the conclusion that a countries income status was not distinguishable from its climate change indicators, but the LASSO and Elastic Net models were able to show that these indicators can show the income status of a country. I think this is a great starting point for continued analysis into world development indicators and their ability to classify. 
+The next steps I would take with this model is to take these indicators and check them against the rest of the data and see if the 14 indicators can be replicated throughout the years. That was a major hurdle in this analysis was simply getting enough complete data to look at the entire dataset. If this can be further validated against other years, then it could uncover the true difference between high income and low income nations when it comes to climate change. I would also dig deeper into the data and determine other variables and try to pull them out, specifically bigger indicators around power usage. The original model had these values within them, but I think more time put into the model by eliminated variation could show other interesting insights. It may be possible to isolate types of indicators and run models based on those types instead of such a wide swath of climate indicators. 
+In closing, this was a very interesting project that taught me new modeling techniques and answered some of the basic questions around climate indicators as well as opened the door for more research and modeling to look into other indicators or different manifestions of the climate indicators from the World Bank. 
+
+# Bibliography
+
+Kirenz, J. (2021, February 16). Classification with Tidymodels, Workflows and Recipes. Retrieved from Jan Kirenz: https://www.kirenz.com/post/2021-02-17-r-classification-tidymodels/
+
+Kuhn, M., & Silge, J. (2022, April 15). Tidy Modeling with R. Retrieved from tmwr: https://www.tmwr.org/
+
+World Bank Group. (2020, April 4). Accessing International Debt Statistics (IDS) through the World Bank Data API. Retrieved from github: https://worldbank.github.io/debt-data/api-guide/ids-api-guide-r-2.html
+
+World Bank Group. (2022, January 1). Climate Change Knowledge Portal. Retrieved from Climate Change Knowledge Portal: https://climateknowledgeportal.worldbank.org/
+
+
+
+
+
+

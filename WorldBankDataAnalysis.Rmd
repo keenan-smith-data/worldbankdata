@@ -10,31 +10,22 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 
-```{r Library Initialize Block}
+```{r Library Initialize Block, include=FALSE}
 suppressPackageStartupMessages(library(tidyverse))
 suppressPackageStartupMessages(library(tidymodels))
 suppressPackageStartupMessages(library(WDI))
 suppressPackageStartupMessages(library(glmnet))
+library(nnet)
 ```
 
 
-
 ```{r WDI API Pull}
-
-indicator_codes <- c('SI.POV.DDAY','SP.DYN.LE00.IN','SP.POP.TOTL','SP.POP.GROW','SM.POP.NETM','NY.GDP.MKTP.CD','NY.GDP.PCAP.CD','NY.GDP.MKTP.KD.ZG','SL.UEM.TOTL.ZS','FP.CPI.TOTL.ZG','BX.TRF.PWKR.DT.GD.ZS','EN.ATM.CO2E.PC','AG.LND.FRST.ZS','EG.ELC.ACCS.ZS','ER.H2O.FWTL.ZS','EG.ELC.RNWX.ZS','SH.STA.SMSS.ZS','VC.IHR.PSRC.P5','GC.DOD.TOTL.GD.ZS','IT.NET.USER.ZS','SG.GEN.PARL.ZS','BX.KLT.DINV.WD.GD.ZS','SI.POV.GINI')
+indicator_codes <- c('SI.POV.DDAY','SP.DYN.LE00.IN','SP.POP.TOTL','SP.POP.GROW','SM.POP.NETM','NY.GDP.MKTP.CD','NY.GDP.PCAP.CD','NY.GDP.MKTP.KD.ZG','SL.UEM.TOTL.ZS','FP.CPI.TOTL.ZG','BX.TRF.PWKR.DT.GD.ZS','EN.ATM.CO2E.PC','AG.LND.FRST.ZS','EG.ELC.ACCS.ZS','ER.H2O.FWTL.ZS','EG.ELC.RNWX.ZS','SH.STA.SMSS.ZS','VC.IHR.PSRC.P5','GC.DOD.TOTL.GD.ZS','IT.NET.USER.ZS','SG.GEN.PARL.ZS','BX.KLT.DINV.WD.GD.ZS','SI.POV.GINI','SG.DMK.SRCR.FN.ZS', 'SI.DST.10TH.10', 'SI.DST.FRST.10', 'SP.DYN.TFRT.IN', 'SL.TLF.TOTL.FE.ZS', 'SL.TLF.CACT.MA.ZS', 'SL.TLF.CACT.FE.ZS', 'FB.BNK.CAPA.ZS', 'SP.URB.TOTL.IN.ZS', 'GB.XPD.RSDV.GD.ZS', 'SP.POP.SCIE.RD.P6', 'SP.POP.TECH.RD.P6', 'BX.GSR.ROYL.CD', 'TX.VAL.TECH.CD', 'IP.TMK.RESD', 'IP.TMK.NRES', 'IP.PAT.RESD', 'IP.PAT.NRES')
 
 first_year <- 2010
 last_year <- 2022
 
-initial_WDI <- WDI(indicator = indicator_codes, start = first_year, end = last_year, extra = TRUE) |>
-  as_tibble()
-```
-
-```{r}
-indicator_codes_additional <- c('SG.DMK.SRCR.FN.ZS', 'SI.DST.10TH.10', 'SI.DST.FRST.10', 'SP.DYN.TFRT.IN', 'SL.TLF.TOTL.FE.ZS', 'SL.TLF.CACT.MA.ZS',
-                                'SL.TLF.CACT.FE.ZS', 'FB.BNK.CAPA.ZS', 'SP.URB.TOTL.IN.ZS', 'GB.XPD.RSDV.GD.ZS', 'SP.POP.SCIE.RD.P6', 'SP.POP.TECH.RD.P6', 'BX.GSR.ROYL.CD', 'TX.VAL.TECH.CD', 'IP.TMK.RESD', 'IP.TMK.NRES', 'IP.PAT.RESD', 'IP.PAT.NRES')
-
-additional_WDI <- WDI(indicator = indicator_codes_additional, start = first_year, end = last_year) |>
+initial_wdi <- WDI(indicator = indicator_codes, start = first_year, end = last_year, extra = TRUE) |>
   as_tibble()
 ```
 
@@ -42,8 +33,8 @@ additional_WDI <- WDI(indicator = indicator_codes_additional, start = first_year
 ```{r Data Tidy}
 # str(initial_WDI)
 
-tidy_WDI <-
-  initial_WDI |>
+tidy_wdi <-
+  initial_wdi |>
   rename(poverty_headcount = SI.POV.DDAY,
          life_exp = SP.DYN.LE00.IN,
          pop_tot = SP.POP.TOTL,
@@ -66,13 +57,8 @@ tidy_WDI <-
          internet_use = IT.NET.USER.ZS,
          women_parlia = SG.GEN.PARL.ZS,
          foreign_invest = BX.KLT.DINV.WD.GD.ZS,
-         gini = SI.POV.GINI) |>
-  mutate(income = as_factor(income),
-         region = as_factor(region))
-
-tidy_add_wdi <-
-  additional_WDI |>
-  rename(women_decisions = SG.DMK.SRCR.FN.ZS,
+         gini = SI.POV.GINI,
+         women_decisions = SG.DMK.SRCR.FN.ZS,
          highest_ten = SI.DST.10TH.10,
          lowest_ten = SI.DST.FRST.10,
          fertility_rate = SP.DYN.TFRT.IN,
@@ -89,263 +75,95 @@ tidy_add_wdi <-
          trdmk_res = IP.TMK.RESD,
          trdmk_nres = IP.TMK.NRES,
          pat_res = IP.PAT.RESD,
-         pat_nres = IP.PAT.NRES)
-
-omega_tidy_wdi <-
-  tidy_WDI |>
-  left_join(tidy_add_wdi)
+         pat_nres = IP.PAT.NRES) |>
+  mutate(income = as.factor(income),
+         region = as.factor(region)) |>
+  select(-poverty_headcount, -migration_net, -water_withdraw, -women_decisions,
+         -highest_ten, -lowest_ten, -bank_cap, -longitude, -latitude, -lending,
+         -iso3c, -capital, -lastupdated, -status, -gov_debt, -gini)
 
 
 tidy_WDI_2010 <-
-  omega_tidy_wdi |>
-  filter(year == 2010 & income != "Aggregates")
+  tidy_wdi |>
+  filter(year == 2010 & income != "Aggregates" & !is.na(gdp_per_cap)) |>
+  select(-country, -year)
+
+tidy_WDI_2015 <-
+  tidy_wdi |>
+  filter(year == 2015 & income != "Aggregates" & !is.na(gdp_per_cap)) |>
+  select(-country, -year)
 
 tidy_WDI_2018 <-
-  omega_tidy_wdi |>
-  filter(year == 2018 & income != "Aggregates")
+  tidy_wdi |>
+  filter(year == 2018 & income != "Aggregates" & income != "Not classified" & !is.na(gdp_per_cap)) |>
+  select(-country, -year)
 
-write_csv(tidy_WDI, "tidy_WDI")
-write_csv(omega_tidy_wdi, "omega_tidy_wdi")
+write_csv(tidy_wdi, "tidy_WDI")
 write_csv(tidy_WDI_2010, "tidy_WDI_2010")
+write_csv(tidy_WDI_2015, "tidy_WDI_2015")
 write_csv(tidy_WDI_2018, "tidy_WDI_2018")
 ```
 
+```{r}
+tidy_WDI_2010 |>
+  group_by(income) |>
+  summarize(num = n(), std_dev = sd(gdp_per_cap, na.rm=TRUE), avg = mean(gdp_per_cap, na.rm=TRUE))
 
+tidy_WDI_2015 |>
+  group_by(income) |>
+  summarize(num = n(), std_dev = sd(gdp_per_cap, na.rm=TRUE), avg = mean(gdp_per_cap, na.rm=TRUE))
 
-```{r 2010 Scatter Plots}
-ggplot(data = tidy_WDI_2010, aes(x = poverty_headcount, y = gdp)) +
-  geom_point() +
-  labs(title="Poverty Headcount vs GDP")
-ggplot(data = tidy_WDI_2010, aes(x = life_exp, y = gdp)) +
-  geom_point() +
-  labs(title="Life Expectancy vs GDP")
-ggplot(data = tidy_WDI_2010, aes(x = pop_tot, y = gdp)) +
-  geom_point() +
-  labs(title="Population Total vs GDP")
-ggplot(data = tidy_WDI_2010, aes(x = pop_grow, y = gdp)) +
-  geom_point() +
-  labs(title="Population Growth vs GDP")
-ggplot(data = tidy_WDI_2010, aes(x = gdp_grow, y = gdp)) +
-  geom_point() +
-  labs(title="GDP Growth vs GDP")
-ggplot(data = tidy_WDI_2010, aes(x = unemployment, y = gdp)) +
-  geom_point() +
-  labs(title="Unemployment vs GDP")
-ggplot(data = tidy_WDI_2010, aes(x = inflation, y = gdp)) +
-  geom_point() +
-  labs(title="Inflation vs GDP")
-ggplot(data = tidy_WDI_2010, aes(x = pers_remit, y = gdp)) +
-  geom_point() +
-  labs(title="Personal Remittance vs GDP")
-ggplot(data = tidy_WDI_2010, aes(x = co2_emis, y = gdp)) +
-  geom_point() +
-  labs(title="CO2 Emissions vs GDP")
-ggplot(data = tidy_WDI_2010, aes(x = forest_area, y = gdp)) +
-  geom_point() +
-  labs(title="Forest Area vs GDP")
-ggplot(data = tidy_WDI_2010, aes(x = elec_access, y = gdp)) +
-  geom_point() +
-  labs(title="Electrical Access vs GDP")
-ggplot(data = tidy_WDI_2010, aes(x = water_withdraw, y = gdp)) +
-  geom_point() +
-  labs(title="Water Withdrawals vs GDP")
-ggplot(data = tidy_WDI_2010, aes(x = elec_prod_renew, y = gdp)) +
-  geom_point() +
-  labs(title="Electrical Production from Renewables vs GDP")
-ggplot(data = tidy_WDI_2010, aes(x = sanitation, y = gdp)) +
-  geom_point() +
-  labs(title="Sanitation vs GDP")
-ggplot(data = tidy_WDI_2010, aes(x = int_homic, y = gdp)) +
-  geom_point() +
-  labs(title="Intentional Homicides vs GDP")
-ggplot(data = tidy_WDI_2010, aes(x = gov_debt, y = gdp)) +
-  geom_point() +
-  labs(title="Government Debt vs GDP")
-ggplot(data = tidy_WDI_2010, aes(x = internet_use, y = gdp)) +
-  geom_point() +
-  labs(title="Internet Use vs GDP")
-ggplot(data = tidy_WDI_2010, aes(x = women_parlia, y = gdp)) +
-  geom_point() +
-  labs(title="Women in Parliament vs GDP")
-ggplot(data = tidy_WDI_2010, aes(x = foreign_invest, y = gdp)) +
-  geom_point() +
-  labs(title="Foreign Investment vs GDP")
-ggplot(data = tidy_WDI_2010, aes(x = gini, y = gdp)) +
-  geom_point() +
-  labs(title="GINI vs GDP")
-
-ggplot(data = tidy_WDI_2010, aes(x = women_decisions, y = gdp)) +
-  geom_point() +
-  labs(title="Womens Decision vs GDP")
-
-ggplot(data = tidy_WDI_2010, aes(x = highest_ten, y = gdp)) +
-  geom_point() +
-  labs(title="Wealth Owned by Highed 10% vs GDP")
-
-ggplot(data = tidy_WDI_2010, aes(x = lowest_ten, y = gdp)) +
-  geom_point() +
-  labs(title="Wealth Owned by Lowest 10% vs GDP")
-
-ggplot(data = tidy_WDI_2010, aes(x = fertility_rate, y = gdp)) +
-  geom_point() +
-  labs(title="Fertility Rate vs GDP")
-
-ggplot(data = tidy_WDI_2010, aes(x = labor_force_fe, y = gdp)) +
-  geom_point() +
-  labs(title="Labor Force Female % vs GDP")
-
-ggplot(data = tidy_WDI_2010, aes(x = lab_for_part_m, y = gdp)) +
-  geom_point() +
-  labs(title="Labor Participation Rate Male vs GDP")
-
-ggplot(data = tidy_WDI_2010, aes(x = lab_for_part_f, y = gdp)) +
-  geom_point() +
-  labs(title="Labor Participation Rate Female vs GDP")
-
-ggplot(data = tidy_WDI_2010, aes(x = bank_cap, y = gdp)) +
-  geom_point() +
-  labs(title="Bank Capitalization vs GDP")
-
-ggplot(data = tidy_WDI_2010, aes(x = urb_pop, y = gdp)) +
-  geom_point() +
-  labs(title="Urban Population vs GDP")
-
-ggplot(data = tidy_WDI_2010, aes(x = research_exp, y = gdp)) +
-  geom_point() +
-  labs(title="Research Expenditure vs GDP")
-
-ggplot(data = tidy_WDI_2010, aes(x = res_in_rd, y = gdp)) +
-  geom_point() +
-  labs(title="Researchers in R&D vs GDP")
+gdp_income_2018 <-
+  tidy_WDI_2018 |>
+  group_by(income) |>
+  summarize(num = n(), std_dev = sd(gdp_per_cap, na.rm=TRUE), avg = mean(gdp_per_cap, na.rm=TRUE))
 ```
+
+```{r}
+lm_fit_1 <- lm(gdp_per_cap ~ income, data = tidy_WDI_2018)
+summary(lm_fit_1)
+visreg::visreg(lm_fit_1)
+
+lm_fit_2 <- lm(gdp_per_cap ~ region, data = tidy_WDI_2018)
+summary(lm_fit_2)
+visreg::visreg(lm_fit_2)
+```
+
 
 ```{r 2010 Bar Charts}
-ggplot(data = tidy_WDI_2010, aes(x = region, y = gdp)) +
+ggplot(data = tidy_WDI_2010, aes(x = region, y = gdp_per_cap)) +
   geom_col()
 
-ggplot(data = tidy_WDI_2010, aes(x = income, y = gdp)) +
+ggplot(data = tidy_WDI_2010, aes(x = income, y = gdp_per_cap)) +
   geom_col()
 
-ggplot(data = tidy_WDI_2010, aes(x = region, y = gdp)) +
+ggplot(data = tidy_WDI_2010, aes(x = region, y = gdp_per_cap)) +
   geom_boxplot()
 
-ggplot(data = tidy_WDI_2010, aes(x = income, y = gdp)) +
+ggplot(data = tidy_WDI_2010, aes(x = income, y = gdp_per_cap)) +
   geom_boxplot()
 
-ggplot(data = tidy_WDI_2010, aes(x = income, y = gini)) +
-  geom_boxplot()
+tidy_WDI_2018 |>
+  filter(income == "High income") |>
+  ggplot(aes(x = gdp_per_cap)) +
+  geom_histogram()
 
-ggplot(data = tidy_WDI_2010, aes(x = region, y = gini)) +
-  geom_boxplot()
+tidy_WDI_2018 |>
+  filter(income == "Low income") |>
+  ggplot(aes(x = gdp_per_cap)) +
+  geom_histogram()
 
+tidy_WDI_2018 |>
+  filter(income == "Lower middle income") |>
+  ggplot(aes(x = gdp_per_cap)) +
+  geom_histogram()
+
+tidy_WDI_2018 |>
+  filter(income == "Upper middle income") |>
+  ggplot(aes(x = gdp_per_cap)) +
+  geom_histogram()
 ```
 
-```{r 2010 Scatter Plots}
-ggplot(data = tidy_WDI_2018, aes(x = poverty_headcount, y = gini)) +
-  geom_point() +
-  labs(title="Poverty Headcount vs GINI")
-ggplot(data = tidy_WDI_2018, aes(x = life_exp, y = gini)) +
-  geom_point() +
-  labs(title="Life Expectancy vs GINI")
-ggplot(data = tidy_WDI_2018, aes(x = pop_tot, y = gini)) +
-  geom_point() +
-  labs(title="Population Total vs GINI")
-ggplot(data = tidy_WDI_2018, aes(x = pop_grow, y = gini)) +
-  geom_point() +
-  labs(title="Population Growth vs GINI")
-ggplot(data = tidy_WDI_2018, aes(x = gdp_grow, y = gini)) +
-  geom_point() +
-  labs(title="GDP Growth vs GINI")
-ggplot(data = tidy_WDI_2018, aes(x = unemployment, y = gini)) +
-  geom_point() +
-  labs(title="Unemployment vs GINI")
-ggplot(data = tidy_WDI_2018, aes(x = inflation, y = gini)) +
-  geom_point() +
-  labs(title="Inflation vs GINI")
-ggplot(data = tidy_WDI_2018, aes(x = pers_remit, y = gini)) +
-  geom_point() +
-  labs(title="Personal Remittance vs GINI")
-ggplot(data = tidy_WDI_2018, aes(x = co2_emis, y = gini)) +
-  geom_point() +
-  labs(title="CO2 Emissions vs GINI")
-ggplot(data = tidy_WDI_2018, aes(x = forest_area, y = gini)) +
-  geom_point() +
-  labs(title="Forest Area vs GINI")
-ggplot(data = tidy_WDI_2018, aes(x = elec_access, y = gini)) +
-  geom_point() +
-  labs(title="Electrical Access vs GINI")
-ggplot(data = tidy_WDI_2018, aes(x = water_withdraw, y = gini)) +
-  geom_point() +
-  labs(title="Water Withdrawals vs GINI")
-ggplot(data = tidy_WDI_2018, aes(x = elec_prod_renew, y = gini)) +
-  geom_point() +
-  labs(title="Electrical Production from Renewables vs GINI")
-ggplot(data = tidy_WDI_2018, aes(x = sanitation, y = gini)) +
-  geom_point() +
-  labs(title="Sanitation vs GINI")
-ggplot(data = tidy_WDI_2018, aes(x = int_homic, y = gini)) +
-  geom_point() +
-  labs(title="Intentional Homicides vs GINI")
-ggplot(data = tidy_WDI_2018, aes(x = gov_debt, y = gini)) +
-  geom_point() +
-  labs(title="Government Debt vs GINI")
-ggplot(data = tidy_WDI_2018, aes(x = internet_use, y = gini)) +
-  geom_point() +
-  labs(title="Internet Use vs GINI")
-ggplot(data = tidy_WDI_2018, aes(x = women_parlia, y = gini)) +
-  geom_point() +
-  labs(title="Women in Parliament vs GINI")
-ggplot(data = tidy_WDI_2018, aes(x = foreign_invest, y = gini)) +
-  geom_point() +
-  labs(title="Foreign Investment vs GINI")
-ggplot(data = tidy_WDI_2018, aes(x = gdp, y = gini)) +
-  geom_point() +
-  labs(title="GINI vs GDP")
-
-ggplot(data = tidy_WDI_2018, aes(x = women_decisions, y = gdp)) +
-  geom_point() +
-  labs(title="Womens Decision vs GDP")
-
-ggplot(data = tidy_WDI_2018, aes(x = highest_ten, y = gdp)) +
-  geom_point() +
-  labs(title="Wealth Owned by Highed 10% vs GDP")
-
-ggplot(data = tidy_WDI_2018, aes(x = lowest_ten, y = gdp)) +
-  geom_point() +
-  labs(title="Wealth Owned by Lowest 10% vs GDP")
-
-ggplot(data = tidy_WDI_2018, aes(x = fertility_rate, y = gdp)) +
-  geom_point() +
-  labs(title="Fertility Rate vs GDP")
-
-ggplot(data = tidy_WDI_2018, aes(x = labor_force_fe, y = gdp)) +
-  geom_point() +
-  labs(title="Labor Force Female % vs GDP")
-
-ggplot(data = tidy_WDI_2018, aes(x = lab_for_part_me, y = gdp)) +
-  geom_point() +
-  labs(title="Labor Participation Rate Male vs GDP")
-
-ggplot(data = tidy_WDI_2018, aes(x = lab_for_part_f, y = gdp)) +
-  geom_point() +
-  labs(title="Labor Participation Rate Female vs GDP")
-
-ggplot(data = tidy_WDI_2018, aes(x = bank_cap, y = gdp)) +
-  geom_point() +
-  labs(title="Bank Capitalization vs GDP")
-
-ggplot(data = tidy_WDI_2018, aes(x = urb_pop, y = gdp)) +
-  geom_point() +
-  labs(title="Urban Population vs GDP")
-
-ggplot(data = tidy_WDI_2018, aes(x = research_exp, y = gdp)) +
-  geom_point() +
-  labs(title="Research Expenditure vs GDP")
-
-ggplot(data = tidy_WDI_2018, aes(x = res_in_rd, y = gdp)) +
-  geom_point() +
-  labs(title="Researchers in R&D vs GDP")
-```
 
 
 ```{r 2018 Bar Charts}
@@ -360,12 +178,73 @@ ggplot(data = tidy_WDI_2018, aes(x = region, y = gdp)) +
 
 ggplot(data = tidy_WDI_2018, aes(x = income, y = gdp)) +
   geom_boxplot()
-
-ggplot(data = tidy_WDI_2018, aes(x = region, y = gini)) +
-  geom_boxplot()
-
-ggplot(data = tidy_WDI_2018, aes(x = income, y = gini)) +
-  geom_boxplot()
 ```
 
+```{r Model Engines via TidyModels Framework}
+# Least Squares Linear Regression
+lm_spec <-
+  linear_reg() |>
+  set_engine("lm") |>
+  set_mode("regression")
+
+# Ridge Regression Using Glmnet
+ridge_spec <-
+  linear_reg(penalty = tune(), mixture = 0) |>
+  set_mode("regression") |>
+  set_engine("glmnet")
+
+# Lasso Regression Using Glmnet
+lasso_spec <-
+  linear_reg(penalty = tune(), mixture = 1) |>
+  set_mode("regression") |>
+  set_engine("glmnet")
+
+# Elastic Net Regression Using Glmnet
+elastic_spec <-
+  linear_reg(penalty = tune(), mixture = tune()) |>
+  set_mode("regression") |>
+  set_engine("glmnet")
+
+# Multinomial Regression
+multinom_spec <-
+  multinom_reg() |>
+  set_mode("classification") |>
+  set_engine("nnet")
+```
+
+```{r}
+set.seed(100)
+
+# Splitting Data via Rsample
+country_split_2018 <- initial_split(tidy_WDI_2018, strata = income, prop = .8)
+
+country_train_2018 <- training(country_split_2018)
+country_test_2018 <- testing(country_split_2018)
+
+country_folds_2018 <- vfold_cv(country_train_2018, v = 10)
+```
+
+
+```{r}
+# life_exp + pop_tot + pop_grow + gdp + gdp_per_cap + gdp_grow + unemployment + inflation + pers_remit + co2_emis + forest_area + elec_access + elec_prod_renew + sanitation + int_homic + internet_use + women_parlia + foreign_invest + fertility_rate + labor_force_fe + lab_for_part_m + lab_for_part_f + urb_pop,research_exp + res_in_rd + tech_in_rd + charge_int_prop + hi_tech_exports + trdmk_res + trdmk_nres + pat_res + pat_nres
+```
+
+
+```{r}
+income_rec <-
+  recipe(income ~ gdp_per_cap, data = country_train_2018)
+
+income_wf <-
+  workflow() |>
+  add_model(multinom_spec) |>
+  add_recipe(income_rec)
+
+income_fit <- fit(income_wf, data = country_train_2018)
+
+model1_tidy <- 
+  income_fit |>
+  extract_fit_engine()
+
+summary(model1_tidy)
+```
 

@@ -1,0 +1,323 @@
+---
+title: "Classification of High and Low Income based on Environmental Factors"
+author: "Keenan Smith"
+date: "`r Sys.Date()`"
+mainfont: Roboto
+geometry: margin=1cm
+output: 
+  pdf_document:
+    df_print: kable
+    latex_engine: xelatex
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r Library Initialize Block, include=FALSE}
+library(tidyverse)
+library(tidymodels)
+library(WDI)
+library(glmnet)
+library(visdat)
+library(GGally)
+```
+
+```{r Functions, include=FALSE}
+# Box-plot Printing Function for Ease of Use (pulled from Kirenz, 2021)
+print_boxplot_2010 <- function(.y_var){
+  
+  # convert strings to variable
+  y_var <- sym(.y_var) 
+ 
+  # unquote variables using {{}}
+  explore_2010 %>% 
+  ggplot(aes(x = income_status, y = {{y_var}},
+             fill = income_status, color = income_status)) +
+  geom_boxplot(alpha=0.4) 
+  
+} 
+
+# Box-plot Printing Function for Ease of Use (pulled from Kirenz, 2021)
+print_boxplot_2018 <- function(.y_var){
+  
+  # convert strings to variable
+  y_var <- sym(.y_var) 
+ 
+  # unquote variables using {{}}
+  explore_2018 %>% 
+  ggplot(aes(x = income_status, y = {{y_var}},
+             fill = income_status, color = income_status)) +
+  geom_boxplot(alpha=0.4) 
+  
+} 
+
+print_histogram_2010 <- function(.y_var){
+  
+  # convert strings to variable
+  y_var <- sym(.y_var) 
+ 
+  # unquote variables using {{}}
+  explore_2010 %>% 
+  ggplot(aes(x = {{y_var}},
+             fill = income_status, color = income_status)) +
+  geom_histogram() 
+  
+} 
+
+print_histogram_2018 <- function(.y_var){
+  
+  # convert strings to variable
+  y_var <- sym(.y_var) 
+ 
+  # unquote variables using {{}}
+  explore_2018 %>% 
+  ggplot(aes(x = {{y_var}},
+             fill = income_status, color = income_status)) +
+  geom_histogram() 
+  
+} 
+
+get_model <- function(x) {
+  pull_workflow_fit(x) %>% tidy()
+}
+```
+
+```{r Data Tidy, include=FALSE}
+# Getting Data In
+env_wdi <- read_csv("tidy_env_wdi", show_col_types = FALSE)
+
+# Cleaning Data of Majority NA Values and Ready for Year Splits
+env_wdi_ready <-
+  env_wdi |>
+  mutate(region = as.factor(region),
+         income = as.factor(income),
+         income_status = as.factor(ifelse(income == "High income", "High", "Middle_Low"))) |>
+  arrange(year) |>
+  filter(year < 2019 & income != "Aggregates" & income != "Not classified" & !is.na(income)) |>
+  select(-status, -lastupdated, -forest_km, -avg_precip_mm, -urban_pop, -ease_business, -cpia_public_sec, -health_workers, -underweight_5_per,
+         -pov_headcount, -renew_non_hydro, -energy_use_oil_eqiv, -energy_use_oil_percap, -co2_intensity, -co2_gaseous_per, -co2_emissions_met, 
+         -co2_emissions, -co2_liquid_per, -co2_solid_per, -other_greenhouse_per, -total_greenhouse_per, -methane_per, -pfc_emission_mt, 
+         -sf6_emission_mt, -disaster_risk_score, -ghg_emission_mt, -dro_flood_extemp_per, -pop_agglo_mil_per, -water_withdrawals_cub, 
+         -water_withdrawals_per, -iso3c, -capital, -longitude, -latitude, -lending, -country, -irrigated_land_per, -avg_precip_mm, -irrigated_land_per,
+         -terr_protect_per, -terr_mari_protect_per, -marine_protect_per, -income) 
+
+```
+
+```{r Yearly Data}
+
+env_wdi_2010_na <-
+  env_wdi_ready |>
+  filter(year == 2010) |>
+  select(-year, -iso2c,-urban_below_5_per, -land_below_5_per, -pop_below_5_per, -rural_below_5, -rural_below_5_per,
+         -urban_below_5, -urban_below_5_per, -rural_pop_below_5, -urban_pop_below_5)
+
+env_wdi_2010 <-
+  env_wdi_ready |>
+  filter(year == 2010) |>
+  select(-year, -iso2c) |>
+  na.omit()
+
+env_wdi_2018_na <-
+  env_wdi_ready |>
+  filter(year == 2018) |>
+  select(-year, -iso2c,-urban_below_5_per, -land_below_5_per, -pop_below_5_per)
+```
+
+
+```{r 2010 Initial Data Analysis}
+vis_dat(env_wdi_2010_na)
+vis_miss(env_wdi_2010_na)
+
+is.na(env_wdi_2010_na) |>
+  colSums()
+```
+
+```{r 2018 Initial Data Analysis}
+vis_dat(env_wdi_2018_na)
+vis_miss(env_wdi_2018_na)
+is.na(env_wdi_2018_na) |>
+  colSums()
+
+# Removing Majority Missing Data
+env_wdi_2018 <-
+  env_wdi_2018_na |>
+  select(-urban_below_5, -coal_power_per, -hydro_power_per, -gas_power_per,
+         -nuke_power_per, -oil_power_per, -renew_power_per, -renew_non_hydro_per, -elec_consum_kw, -co2_gaseous_kt,
+         -co2_liquid_kt, -co2_solid_kt, -other_greenhouse_mt, -hfc_emissions_mt, -no_emission_per, -rural_pop_below_5,
+         -urban_pop_below_5, -rural_below_5, -rural_below_5_per)
+
+vis_dat(env_wdi_2018)
+vis_miss(env_wdi_2018)
+```
+
+```{r Looking at the Percentages of the Classification Variable}
+env_wdi_2010_na %>% 
+  count(income_status, # count observations
+        name ="total") %>%  # name the new variable 
+  mutate(percent = total/sum(total))
+
+
+env_wdi_2018 %>% 
+  count(income_status, # count observations
+        name ="total") %>%  # name the new variable 
+  mutate(percent = total/sum(total))
+```
+
+```{r Data Overview for 2010}
+skimr::skim(env_wdi_2010_na)
+```
+
+```{r Data Overview for 2018}
+skimr::skim(env_wdi_2018)
+```
+
+```{r Splitting Data}
+set.seed(100)
+
+split_2010 <- initial_split(env_wdi_2010_na, prop = .8, strata = income_status)
+split_2018 <- initial_split(env_wdi_2018, prop = .8, strata = income_status)
+
+# 2010 Data Split
+train_2010 <- training(split_2010)
+test_2010 <- testing(split_2010)
+
+# 2018 Data Split
+train_2018 <- training(split_2018)
+test_2018 <- testing(split_2018)
+
+# Exploration Datasets to isolate Dataframes from Tampering
+explore_2010 <- train_2010
+explore_2018 <- train_2018
+
+# k-fold Validation Set Creation
+cv_folds_2010 <-vfold_cv(train_2010, v = 10, strata = income_status)
+cv_folds_2018 <-vfold_cv(train_2018, v = 10, strata = income_status)
+```
+
+```{r Data Exploration Starter}
+y_var_2010 <- 
+  explore_2010 %>% 
+  select(where(is.numeric)) %>% 
+  variable.names() # obtain name
+
+y_var_2018 <- 
+  explore_2018 %>% 
+  select(where(is.numeric)) %>% 
+  variable.names() # obtain name
+```
+
+```{r 2010 Boxplots}
+purrr::map(y_var_2010, print_boxplot_2010)
+```
+```{r}
+purrr::map(y_var_2010, print_histogram_2010)
+```
+
+
+```{r 2018 Boxplots}
+purrr::map(y_var_2018, print_boxplot_2018)
+```
+
+```{r}
+purrr::map(y_var_2018, print_histogram_2018)
+```
+
+
+```{r Categorical Variable Exploration}
+explore_2010 %>%
+  ggplot(aes(income_status, region)) +
+  geom_bin2d() +
+  scale_fill_continuous(type = "viridis")
+```
+
+```{r Recipe for 2010}
+
+env_2010_rec <-
+  recipe(income_status ~ ., data = train_2010) |>
+  step_log(agrid_land_km, arable_per, forest_per, pop_tot, mort_rate, coal_power_per, hydro_power_per, gas_power_per,
+           nuke_power_per, oil_power_per, renew_power_per, renew_non_hydro_per, renew_consum_per, elec_consum_kw,
+           co2_gaseous_kt, co2_liquid_kt, co2_emmision_mt, co2_solid_kt, total_greenhouse_mt, hfc_emissions_mt,
+           methane_mt, no_emission_mt, agri_forest_fish_gdp_per) |>
+  step_impute_knn(all_predictors()) |>
+  step_normalize(all_numeric_predictors()) |>
+  step_dummy(all_nominal_predictors()) |>
+  step_corr(all_predictors(), threshold = .7, method = "spearman")
+
+  
+prepped_2010 <-
+  env_2010_rec |>
+  prep() |>
+  juice()
+```
+
+```{r}
+env_2018_rec <-
+  recipe(income_status ~ ., data = train_2018) |>
+  step_log(agrid_land_km, arable_per, forest_per, pop_tot, mort_rate,  
+           renew_consum_per, co2_emmision_mt,total_greenhouse_mt, 
+           methane_mt, no_emission_mt, agri_forest_fish_gdp_per) |>
+  step_impute_knn(all_predictors()) |>
+  step_normalize(all_numeric_predictors()) |>
+  step_dummy(all_nominal_predictors()) |>
+  step_corr(all_predictors(), threshold = .7, method = "spearman")
+
+
+prepped_2018 <-
+  env_2018_rec |>
+  prep() |>
+  juice()
+```
+
+```{r Model Specification}
+# Logistic Regression Model Spec
+log_spec <-
+  logistic_reg() |>
+  set_engine("glm") |>
+  set_mode("classification")
+```
+
+```{r Model Workflows}
+# 2010 Model Workflow
+log_wflow_2010 <-
+  workflow() |>
+  add_recipe(env_2010_rec) |>
+  add_model(log_spec)
+
+# 2018 Model Workflow
+log_wflow_2018 <-
+  workflow() |>
+  add_recipe(env_2018_rec) |>
+  add_model(log_spec)
+```
+
+```{r Fitting Validation Sets}
+
+log_res_2010 <- 
+  log_wflow_2010 %>% 
+  fit_resamples(
+    resamples = cv_folds_2010, 
+    metrics = metric_set(
+      recall, precision, f_meas, 
+      accuracy, kap,
+      roc_auc, sens, spec),
+    control = control_resamples(
+      save_pred = TRUE,
+      extract = get_model)
+    ) 
+
+log_res_2018 <- 
+  log_wflow_2018 %>% 
+  fit_resamples(
+    resamples = cv_folds_2018, 
+    metrics = metric_set(
+      recall, precision, f_meas, 
+      accuracy, kap,
+      roc_auc, sens, spec),
+    control = control_resamples(
+      save_pred = TRUE,
+      extract = get_model)
+    ) 
+
+```
+
