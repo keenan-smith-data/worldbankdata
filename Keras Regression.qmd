@@ -19,7 +19,6 @@ When you click the **Render** button a document will be generated that includes 
 
 You can add options to executable code like this
 
-
 ```{r Keras Regression, include=FALSE}
 # Setting up the Basic Workflow for Lasso based on Silge
 keras_workflow <-
