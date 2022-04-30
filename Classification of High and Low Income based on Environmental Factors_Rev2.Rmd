@@ -109,7 +109,7 @@ get_model <- function(x) {
 
 ```{r Data Tidy, include=FALSE}
 # Getting Data In
-env_wdi <- read_csv("tidy_env_wdi", show_col_types = FALSE)
+env_wdi <- read_csv("data/tidy_env_wdi", show_col_types = FALSE)
 
 # Cleaning Data of Majority NA Values and Ready for Year Splits
 env_wdi_ready <-
@@ -183,8 +183,8 @@ cv_folds_2010 <-vfold_cv(train_2010, v = 10, strata = income_status)
 
 ```{r Data Exploration Starter, include=FALSE}
 y_var_2010 <- 
-  explore_2010 %>% 
-  select(where(is.numeric)) %>% 
+  explore_2010 |>
+  select(where(is.numeric)) |>
   variable.names() # obtain name
 ```
 
@@ -367,6 +367,7 @@ testing_2010 <- bind_cols(testing_lasso_2010, testing_2010)
 
 ```{r LASSO Visuals}
 # A very Cool Graph Based on Silge Work
+# Grid Metrics Analysis
 lasso_grid |>
   collect_metrics() |>
   ggplot(aes(penalty, mean, color = .metric)) +
@@ -381,6 +382,7 @@ lasso_grid |>
   scale_x_log10() +
   theme(legend.position = "none")
 
+# Predictors of the Final Predictors in the LASSO
 # A very nice graph that shows the predictors in Columns
 final_lasso |>
   fit(train_2010) |>
@@ -465,7 +467,7 @@ testing_elastic_2010 <- predict(log_res_elastic, new_data =  test_2010 |> select
 testing_2010 <- bind_cols(testing_elastic_2010, testing_2010)
 
 log_elastic_2010 <- 
-  final_elastic %>% 
+  final_elastic |>
   fit_resamples(
     resamples = cv_folds_2010, 
     metrics = metric_set(
@@ -481,7 +483,7 @@ log_elastic_2010 <-
 ## Elastic Net Fit & Visuals
 
 ```{r Elastic Net Visuals}
-# A very Cool Graph Based on Silge Work
+# Metrics of Grid Fit
 elastic_grid |>
   collect_metrics() |>
   ggplot(aes(penalty, mean, color = .metric)) +
@@ -496,7 +498,7 @@ elastic_grid |>
   scale_x_log10() +
   theme(legend.position = "none")
 
-# A very nice graph that shows the predictors in Columns
+# Predictors in Final Elastic Net Regression
 final_elastic |>
   fit(train_2010) |>
   extract_fit_parsnip() |>

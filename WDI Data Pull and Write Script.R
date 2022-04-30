@@ -11,7 +11,7 @@ last_year <- 2022
 environmental_wdi <- WDI(indicator = indicator_codes, start = first_year, end = last_year, extra = TRUE) |>
   as_tibble()
 
-write_csv(environmental_wdi, "Environmental WDI.csv")
+write_csv(environmental_wdi, "data/Environmental WDI.csv")
 
 tidy_env_wdi <-
   environmental_wdi |>
@@ -92,4 +92,4 @@ tidy_env_wdi <-
          terr_mari_protect_per = ER.PTD.TOTL.ZS,
          agri_forest_fish_gdp_per = NV.AGR.TOTL.ZS)
 
-write_csv(tidy_env_wdi, "tidy_env_wdi.csv")
+write_csv(tidy_env_wdi, "data/tidy_env_wdi.csv")

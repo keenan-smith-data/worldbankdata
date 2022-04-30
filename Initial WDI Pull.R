@@ -74,7 +74,7 @@ tidy_WDI_2018 <-
   filter(year == 2018 & income != "Aggregates" & income != "Not classified" & !is.na(gdp_per_cap)) |>
   select(-country, -year)
 
-write_csv(tidy_wdi, "tidy_WDI.csv")
-write_csv(tidy_WDI_2010, "tidy_WDI_2010.csv")
-write_csv(tidy_WDI_2015, "tidy_WDI_2015.csv")
-write_csv(tidy_WDI_2018, "tidy_WDI_2018.csv")
+write_csv(tidy_wdi, "data/tidy_WDI.csv")
+write_csv(tidy_WDI_2010, "data/tidy_WDI_2010.csv")
+write_csv(tidy_WDI_2015, "data/tidy_WDI_2015.csv")
+write_csv(tidy_WDI_2018, "data/tidy_WDI_2018.csv")
