@@ -43,8 +43,6 @@ all_cores <- parallel::detectCores(logical = FALSE)
 
 cl <- makePSOCKcluster(all_cores)
 registerDoParallel(cl)
-
-clusterEvalQ(cl, {library(tidymodels)})
 ```
 
 ```{r Functions, include=FALSE}
@@ -109,7 +107,7 @@ get_model <- function(x) {
 
 ```{r Data Tidy, include=FALSE}
 # Getting Data In
-env_wdi <- read_csv("data/tidy_env_wdi", show_col_types = FALSE)
+env_wdi <- read_csv("data/tidy_env_wdi.csv", show_col_types = FALSE)
 
 # Cleaning Data of Majority NA Values and Ready for Year Splits
 env_wdi_ready <-
